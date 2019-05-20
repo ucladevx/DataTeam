@@ -6,8 +6,9 @@ from google.oauth2 import id_token
 from dateutil import parser
 from google.auth.transport import requests
 from .models import User, Error
-from .util import convertDateToRFC3339
-import os.path, json
+from .util import convertDateToRFC3339, convertDateTimeToRFC3339, formulate_open_timeslots
+import os.path, json, time, datetime, pytz
+from pytz import timezone
 
 routes_blueprint = Blueprint('routes', __name__)
 
@@ -57,6 +58,44 @@ def login():
         # Invalid token
         raise Error(e, status_code = 400)
 
+@routes_blueprint.route('/free_intervals/id=<id>')
+@cross_origin(supports_credentials=True)
+def get_free_intervals(id):
+    user = User.objects(user_id = id).first()
+    if not user:
+        raise Error("No existing user with the associated user ID", status_code = 400)
+    else:
+        access_token = user.access_token
+    
+    
+    credentials = AccessTokenCredentials(access_token, 'my-user-agent/1.0')
+
+
+    try: 
+        service = build('calendar', 'v3', credentials=credentials)
+
+        local_timezone = timezone('US/Pacific')
+        now = datetime.datetime.now(tz=local_timezone)
+        today = now.date()
+        today_7am = local_timezone.localize(datetime.datetime.combine(today, datetime.time(7,0)))
+        tomorrow = today + datetime.timedelta(days=1)
+        tomorrow_start = local_timezone.localize(datetime.datetime.combine(tomorrow, datetime.time(0,0)))
+
+        events_result = service.events().list(calendarId='primary', timeMin=convertDateTimeToRFC3339(today_7am), timeMax=convertDateTimeToRFC3339(tomorrow_start), singleEvents=True, orderBy='startTime').execute()
+        if not events_result:
+            raise ValueError("Could not get events from Calendar API", status_code = 500)
+        events = events_result.get('items', [])
+
+        return jsonify([timeslot.__dict__ for timeslot in formulate_open_timeslots(events, today)]), 200
+
+
+    except ValueError as e:
+        raise Error(e, status_code = 500)
+    
+    except Exception as e:
+        raise Error("Could not connect to calendar API, perhaps due to invalid credentials/access_token --> Returned Error: {}".format(e), status_code = 400)
+
+    
 
 @routes_blueprint.route('/calendar/id=<id>&start=<start_date>&end=<end_date>', methods=['GET'])
 @cross_origin(supports_credentials=True)

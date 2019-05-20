@@ -19,6 +19,21 @@ class User(UserMixin, Document):
             "user_id": self.user_id
         })
 
+class Interval:
+    def __init__(self, start, end, id, duration):
+        self.start = start
+        self.end = end
+        self.id = id
+        self.duration = duration
+    
+    def toJSON(self):
+        return jsonify({
+            "start": self.start,
+            "end": self.end,
+            "id": self.id,
+            "duration": self.duration
+        })
+
 class Error(Exception):
     status_code = 400
 
